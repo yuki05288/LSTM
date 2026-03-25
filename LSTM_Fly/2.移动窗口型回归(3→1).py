@@ -105,3 +105,140 @@ plt.plot(scaler.inverse_transform(dataset))
 plt.plot(trainPredictPlot)
 plt.plot(testPredictPlot)
 plt.show()
+'''
+Train Score: 24.51 RMSE
+Test Score: 67.40 RMSE
+'''
+#pytorch版本
+import numpy as np
+import matplotlib.pyplot as plt
+import pandas as pd
+import torch
+import torch.nn as nn
+from sklearn.preprocessing import MinMaxScaler
+from sklearn.metrics import mean_squared_error
+import math
+
+# 固定随机种子
+np.random.seed(7)
+torch.manual_seed(7)
+
+# 1. 加载数据
+dataframe = pd.read_csv('airline-passengers.csv', usecols=[1], engine='python')
+dataset = dataframe.values
+dataset = dataset.astype('float32')
+
+# 2. 归一化
+scaler = MinMaxScaler(feature_range=(0, 1))
+dataset = scaler.fit_transform(dataset)
+
+# 3. 训练集测试集分割
+train_size = int(len(dataset) * 0.67)
+test_size = len(dataset) - train_size
+train, test = dataset[0:train_size,:], dataset[train_size:len(dataset),:]
+
+# 4. 构造数据集（完全和你原版一样）
+def create_dataset(dataset, look_back=1):
+    dataX, dataY = [], []
+    for i in range(len(dataset)-look_back-1):
+        a = dataset[i:(i+look_back), 0]
+        dataX.append(a)
+        dataY.append(dataset[i + look_back, 0])
+    return np.array(dataX), np.array(dataY)
+
+look_back = 3
+trainX, trainY = create_dataset(train, look_back)
+testX, testY = create_dataset(test, look_back)
+
+# 5. 形状转换：[样本, 1, 特征] 完全和 Keras 一样
+trainX = np.reshape(trainX, (trainX.shape[0], 1, trainX.shape[1]))
+testX = np.reshape(testX, (testX.shape[0], 1, testX.shape[1]))
+
+# 6. 转为 PyTorch 张量
+trainX = torch.tensor(trainX, dtype=torch.float32)
+trainY = torch.tensor(trainY, dtype=torch.float32).view(-1, 1)
+testX = torch.tensor(testX, dtype=torch.float32)
+testY = torch.tensor(testY, dtype=torch.float32).view(-1, 1)
+
+# 7. LSTM 模型（完全复刻 Keras）
+class LSTMNet(nn.Module):
+    def __init__(self):
+        super(LSTMNet, self).__init__()
+        self.lstm = nn.LSTM(input_size=3, hidden_size=4, batch_first=True)
+        self.fc = nn.Linear(4, 1)
+
+    def forward(self, x):
+        out, _ = self.lstm(x)
+        out = self.fc(out)
+        return out.squeeze(-1)  # 🔥 修复维度！
+
+model = LSTMNet()
+
+# 8. 损失函数 + 优化器
+criterion = nn.MSELoss()
+optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
+
+# 9. 训练（batch_size=1，和 Keras 完全一样）
+epochs = 100
+for epoch in range(epochs):
+    model.train()
+    for xi, yi in zip(trainX, trainY):
+        optimizer.zero_grad()
+        output = model(xi.unsqueeze(0))
+        loss = criterion(output, yi.unsqueeze(0))
+        loss.backward()
+        optimizer.step()
+
+    if epoch % 10 == 0:
+        print(f"Epoch {epoch}, Loss: {loss.item():.5f}")
+
+# 10. 预测
+model.eval()
+with torch.no_grad():
+    trainPredict = model(trainX).numpy()
+    testPredict = model(testX).numpy()
+
+# 🔥 修复逆归一化维度错误
+trainPredict = trainPredict.reshape(-1, 1)
+testPredict = testPredict.reshape(-1, 1)
+
+# 11. 逆归一化
+trainPredict = scaler.inverse_transform(trainPredict)
+trainY = scaler.inverse_transform(trainY.numpy())
+testPredict = scaler.inverse_transform(testPredict)
+testY = scaler.inverse_transform(testY.numpy())
+
+# 12. 计算 RMSE
+trainScore = math.sqrt(mean_squared_error(trainY[:,0], trainPredict[:,0]))
+testScore = math.sqrt(mean_squared_error(testY[:,0], testPredict[:,0]))
+print('Train Score: %.2f RMSE' % trainScore)
+print('Test Score: %.2f RMSE' % testScore)
+
+# 13. 绘图（完全对齐）
+trainPredictPlot = np.empty_like(dataset)
+trainPredictPlot[:, :] = np.nan
+trainPredictPlot[look_back:len(trainPredict)+look_back, :] = trainPredict
+
+testPredictPlot = np.empty_like(dataset)
+testPredictPlot[:, :] = np.nan
+testPredictPlot[len(trainPredict)+(look_back*2)+1:len(dataset)-1, :] = testPredict
+
+plt.plot(scaler.inverse_transform(dataset))
+plt.plot(trainPredictPlot)
+plt.plot(testPredictPlot)
+plt.show()
+'''
+结果
+Epoch 0, Loss: 0.00599
+Epoch 10, Loss: 0.00013
+Epoch 20, Loss: 0.00001
+Epoch 30, Loss: 0.00010
+Epoch 40, Loss: 0.00030
+Epoch 50, Loss: 0.00065
+Epoch 60, Loss: 0.00112
+Epoch 70, Loss: 0.00167
+Epoch 80, Loss: 0.00225
+Epoch 90, Loss: 0.00278
+Train Score: 22.84 RMSE
+Test Score: 63.18 RMSE
+'''
